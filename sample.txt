@@ -1,0 +1,1094 @@
+# from fastapi import APIRouter, UploadFile, File, Form, Request
+# from fastapi.responses import JSONResponse
+# from typing import Optional
+# import json, os, shutil, tempfile
+# import dropbox
+# from dropbox.exceptions import ApiError, AuthError
+
+# router = APIRouter(tags=["Dropbox"])
+
+# # Dropbox helper functions
+# def get_dropbox_client(access_token: str):
+#     try:
+#         print("[Dropbox] Initializing client...")
+#         dbx = dropbox.Dropbox(access_token)
+#         dbx.users_get_current_account()
+#         print("[Dropbox] Authentication successful.")
+#         return dbx
+#     except AuthError as e:
+#         print("[Dropbox] Authentication failed.")
+#         raise Exception("Dropbox authentication failed.") from e
+
+# def upload_file(dbx, local_path: str, dropbox_path: str):
+#     print(f"[Dropbox] Uploading file '{local_path}' to '{dropbox_path}'...")
+#     with open(local_path, "rb") as f:
+#         dbx.files_upload(f.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite)
+#     print("[Dropbox] Upload completed.")
+
+# def download_file(dbx, dropbox_path: str, local_path: str):
+#     print(f"[Dropbox] Downloading file '{dropbox_path}' to '{local_path}'...")
+#     metadata, res = dbx.files_download(dropbox_path)
+#     with open(local_path, "wb") as f:
+#         f.write(res.content)
+#     print("[Dropbox] Download completed.")
+
+# def list_files(dbx, folder: str = ""):
+#     print(f"[Dropbox] Listing files in folder '{folder}'...")
+#     response = dbx.files_list_folder(folder)
+#     files = [entry.name for entry in response.entries]
+#     print(f"[Dropbox] Found files: {files}")
+#     return files
+
+
+# @router.post("/dropbox")
+# async def dropbox_action(
+#     request: Request,
+#     action: Optional[str] = Form(None),
+#     credentials: Optional[str] = Form(None),
+#     params: Optional[str] = Form("{}"),
+#     file: UploadFile = File(None),
+# ):
+#     try:
+#         # -------------------- Parse request --------------------
+#         if request.headers.get("content-type", "").startswith("application/json"):
+#             body = await request.json()
+#             credentials = body.get("credentials") or body.get("tool_credentials") or {}
+#             params = body.get("params", {})
+#             action = body.get("action") or credentials.get("action")
+#             previous_result = body.get("previousResult", {})
+#         else:
+#             credentials = json.loads(credentials or "{}")
+#             params = json.loads(params or "{}")
+#             action = action or credentials.get("action")
+#             previous_result = params.get("previousResult", {})
+
+#         print(f"[API] Action: {action}")
+#         print(f"[API] Params: {params}")
+#         print(f"[API] Credentials: {credentials}")
+#         print(f"[API] Previous result: {previous_result}")
+
+#         if not credentials.get("accessToken"):
+#             return JSONResponse(
+#                 content={"error": "Missing accessToken in credentials"},
+#                 status_code=400,
+#             )
+
+#         dbx = get_dropbox_client(credentials.get("accessToken"))
+
+#         # -------------------- UPLOAD --------------------
+#         if action == "upload":
+#             dropbox_path = params.get("dropbox_path") or credentials.get("folderPath")
+#             local_file = params.get("local_file")
+
+#             # If no file or local_file, use previousResult output
+#             if not file and not local_file:
+#                 temp_file_name = "temp_upload_file.txt"
+#                 prev_content = ""
+#                 if previous_result:
+#                     prev_content = previous_result.get("output", {}).get("output1", "")
+#                 with open(temp_file_name, "w") as f:
+#                     f.write(prev_content)
+#                 local_path = temp_file_name
+#                 print(f"[Upload] Using temporary file from previousResult: {local_path}")
+#             elif file:
+#                 with tempfile.NamedTemporaryFile(delete=False) as tmp:
+#                     shutil.copyfileobj(file.file, tmp)
+#                     local_path = tmp.name
+#             else:
+#                 local_path = local_file
+
+#             if not dropbox_path:
+#                 return JSONResponse(
+#                     content={"error": "dropbox_path required for upload"},
+#                     status_code=400,
+#                 )
+
+#             upload_file(dbx, local_path, dropbox_path)
+
+#             # Cleanup temporary file
+#             if file or (not file and not local_file):
+#                 os.remove(local_path)
+#                 print(f"[Upload] Temporary file {local_path} deleted.")
+
+#             return {"status": "success", "action": "upload", "path": dropbox_path}
+
+#         # -------------------- DOWNLOAD --------------------
+#         elif action == "download":
+#             dropbox_path = params.get("dropbox_path") or credentials.get("folderPath")
+#             download_path = params.get("download_path")
+
+#             if not dropbox_path or not download_path:
+#                 return JSONResponse(
+#                     content={"error": "dropbox_path and download_path required"},
+#                     status_code=400,
+#                 )
+
+#             download_file(dbx, dropbox_path, download_path)
+#             return {
+#                 "status": "success",
+#                 "action": "download",
+#                 "message": f"Downloaded to {download_path}",
+#             }
+
+#         # -------------------- LIST --------------------
+#         elif action == "list":
+#             folder = params.get("folder", "")
+#             files = list_files(dbx, folder)
+#             return {"status": "success", "action": "list", "files": files}
+
+#         # -------------------- INVALID --------------------
+#         else:
+#             return JSONResponse(
+#                 content={"error": "Invalid action. Use upload, download, or list"},
+#                 status_code=400,
+#             )
+
+#     except ApiError as e:
+#         return JSONResponse({"error": f"Dropbox API error: {str(e)}"}, status_code=400)
+#     except Exception as e:
+#         return JSONResponse({"error": f"Unexpected error: {str(e)}"}, status_code=400)
+
+
+
+
+
+# from fastapi import APIRouter, UploadFile, File, Form
+# from fastapi.responses import JSONResponse
+# import json, os, shutil, tempfile
+# import dropbox
+# from dropbox.exceptions import ApiError, AuthError
+
+# router = APIRouter(tags=["Dropbox"])
+
+# class DropboxService:
+#     def __init__(self, access_token: str):
+#         try:
+#             self.dbx = dropbox.Dropbox(access_token)
+#             self.dbx.users_get_current_account()
+#         except AuthError as e:
+#             raise Exception("Dropbox authentication failed.") from e
+
+#     def upload_file(self, local_path: str, dropbox_path: str):
+#         with open(local_path, "rb") as f:
+#             self.dbx.files_upload(f.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite)
+
+#     def download_file(self, dropbox_path: str, local_path: str):
+#         metadata, res = self.dbx.files_download(dropbox_path)
+#         with open(local_path, "wb") as f:
+#             f.write(res.content)
+
+#     def list_files(self, folder: str = ""):
+#         response = self.dbx.files_list_folder(folder)
+#         return [entry.name for entry in response.entries]
+
+
+# @router.post("/dropbox")
+# async def dropbox_action(
+#     action: str = Form(...),
+#     credentials: str = Form(...),  # JSON string
+#     params: str = Form("{}"),      # JSON string
+#     file: UploadFile = File(None),
+# ):
+#     try:
+#         credentials = json.loads(credentials)
+#         params = json.loads(params)
+
+#         if not credentials.get("accessToken"):
+#             return JSONResponse({"error": "Missing accessToken in credentials"}, status_code=400)
+
+#         service = DropboxService(access_token=credentials["accessToken"])
+
+#         # Upload
+#         if action == "upload":
+#             dropbox_path = params.get("dropbox_path") or credentials.get("folderPath")
+#             local_file = params.get("local_file")
+
+#             if not dropbox_path or (not file and not local_file):
+#                 return JSONResponse({"error": "dropbox_path and file/local_file required"}, status_code=400)
+
+#             if file:
+#                 with tempfile.NamedTemporaryFile(delete=False) as tmp:
+#                     shutil.copyfileobj(file.file, tmp)
+#                     local_path = tmp.name
+#             else:
+#                 local_path = local_file
+
+#             if not os.path.exists(local_path):
+#                 return JSONResponse({"error": f"Local file '{local_path}' not found."}, status_code=400)
+
+#             service.upload_file(local_path, dropbox_path)
+
+#             if file:
+#                 os.remove(local_path)
+
+#             return {"status": "success", "action": "upload", "path": dropbox_path}
+
+#         # Download
+#         elif action == "download":
+#             dropbox_path = params.get("dropbox_path") or credentials.get("folderPath")
+#             download_path = params.get("download_path")
+
+#             if not dropbox_path or not download_path:
+#                 return JSONResponse({"error": "dropbox_path and download_path required"}, status_code=400)
+
+#             service.download_file(dropbox_path, download_path)
+#             return {"status": "success", "action": "download", "message": f"Downloaded to {download_path}"}
+
+#         # List
+#         elif action == "list":
+#             folder = params.get("folder", "")
+#             files = service.list_files(folder)
+#             return {"status": "success", "action": "list", "files": files}
+
+#         else:
+#             return JSONResponse({"error": "Invalid action. Use upload, download, or list"}, status_code=400)
+
+#     except ApiError as e:
+#         return JSONResponse({"error": f"Dropbox API error: {str(e)}"}, status_code=400)
+#     except Exception as e:
+#         return JSONResponse({"error": f"Unexpected error: {str(e)}"}, status_code=400)
+
+
+
+# from fastapi import APIRouter, UploadFile, File, Form, Request
+# from fastapi.responses import JSONResponse
+# from typing import Optional
+# import json, os, shutil, tempfile
+# import dropbox
+# from dropbox.exceptions import ApiError, AuthError
+
+# router = APIRouter(tags=["Dropbox"])
+
+# class DropboxService:
+#     def __init__(self, access_token: str = None, refresh_token: str = None, app_key: str = None, app_secret: str = None):
+#         """
+#         Supports both long-lived tokens and short-lived tokens with refresh.
+#         """
+#         try:
+#             if refresh_token and app_key and app_secret:
+#                 # Short-lived token with refresh
+#                 self.dbx = dropbox.Dropbox(
+#                     oauth2_refresh_token=refresh_token,
+#                     app_key=app_key,
+#                     app_secret=app_secret
+#                 )
+#                 # Store app credentials for getting refreshed token if needed
+#                 self.app_key = app_key
+#                 self.app_secret = app_secret
+#                 self.refresh_token = refresh_token
+#             elif access_token:
+#                 # Long-lived token
+#                 self.dbx = dropbox.Dropbox(access_token)
+#                 self.access_token = access_token
+#             else:
+#                 raise ValueError("Either access_token or (refresh_token + app_key + app_secret) required")
+
+#             self.dbx.users_get_current_account()
+#             print("✅ Dropbox authentication successful.")
+#         except AuthError as e:
+#             raise Exception("❌ Dropbox authentication failed.") from e
+
+#     def upload_file(self, local_path: str, dropbox_path: str):
+#         with open(local_path, "rb") as f:
+#             self.dbx.files_upload(f.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite)
+
+#     def download_file(self, dropbox_path: str, local_path: str):
+#         metadata, res = self.dbx.files_download(dropbox_path)
+#         with open(local_path, "wb") as f:
+#             f.write(res.content)
+
+#     def list_files(self, folder: str = ""):
+#         response = self.dbx.files_list_folder(folder)
+#         return [entry.name for entry in response.entries]
+
+#     def get_current_access_token(self):
+#         """
+#         Return current access token, refreshes automatically if short-lived.
+#         """
+#         if hasattr(self.dbx, "oauth2_access_token"):
+#             return self.dbx.oauth2_access_token
+#         return getattr(self, "access_token", None)
+
+
+# @router.post("/dropbox")
+# async def dropbox_action(
+#     request: Request,
+#     action: Optional[str] = Form(None),
+#     credentials: Optional[str] = Form(None),  # JSON string if multipart
+#     params: Optional[str] = Form("{}"),
+#     file: UploadFile = File(None),
+# ):
+#     try:
+#         # 🔹 Detect request type
+#         if request.headers.get("content-type", "").startswith("application/json"):
+#             body = await request.json()
+#             print("Received Body", body)
+
+#             credentials = body.get("credentials") or body.get("tool_credentials") or {}
+#             params = body.get("params", {})
+#             action = body.get("action") or credentials.get("action")
+#         else:
+#             credentials = json.loads(credentials or "{}")
+#             params = json.loads(params or "{}")
+#             action = action or credentials.get("action")
+
+#         if not any([credentials.get("accessToken"), credentials.get("refreshToken")]):
+#             return JSONResponse(
+#                 content={"error": "Missing accessToken or refreshToken in credentials"},
+#                 status_code=400,
+#             )
+
+#         # ✅ Initialize Dropbox service
+#         service = DropboxService(
+#             access_token=credentials.get("accessToken"),
+#             refresh_token=credentials.get("refreshToken"),
+#             app_key=credentials.get("appKey"),
+#             app_secret=credentials.get("appSecret"),
+#         )
+
+#         # ✅ Upload
+#         if action == "upload":
+#             dropbox_path = params.get("dropbox_path") or credentials.get("folderPath")
+#             local_file = params.get("local_file")
+
+#             if not dropbox_path or (not file and not local_file):
+#                 return JSONResponse(
+#                     content={"error": "Either (file) or (local_file) and dropbox_path required"},
+#                     status_code=400,
+#                 )
+
+#             # Save UploadFile to temp if provided
+#             if file:
+#                 with tempfile.NamedTemporaryFile(delete=False) as tmp:
+#                     shutil.copyfileobj(file.file, tmp)
+#                     local_path = tmp.name
+#             else:
+#                 local_path = local_file
+
+#             if not os.path.exists(local_path):
+#                 return JSONResponse(
+#                     content={"error": f"Local file '{local_path}' not found."},
+#                     status_code=400,
+#                 )
+
+#             service.upload_file(local_path, dropbox_path)
+
+#             if file:
+#                 os.remove(local_path)
+
+#             return {"status": "success", "action": "upload", "path": dropbox_path}
+
+#         # ✅ Download
+#         elif action == "download":
+#             dropbox_path = params.get("dropbox_path") or credentials.get("folderPath")
+#             download_path = params.get("download_path")
+
+#             if not dropbox_path or not download_path:
+#                 return JSONResponse(
+#                     content={"error": "dropbox_path and download_path required"},
+#                     status_code=400,
+#                 )
+
+#             service.download_file(dropbox_path, download_path)
+#             return {
+#                 "status": "success",
+#                 "action": "download",
+#                 "message": f"Downloaded to {download_path}",
+#             }
+
+#         # ✅ List
+#         elif action == "list":
+#             folder = params.get("folder", "")
+#             files = service.list_files(folder)
+#             return {"status": "success", "action": "list", "files": files}
+
+#         # ❌ Invalid
+#         else:
+#             return JSONResponse(
+#                 content={"error": "Invalid action. Use upload, download, or list"},
+#                 status_code=400,
+#             )
+
+#     except ApiError as e:
+#         return JSONResponse(
+#             content={"error": f"Dropbox API error: {str(e)}"}, status_code=400
+#         )
+#     except Exception as e:
+#         return JSONResponse(
+#             content={"error": f"Unexpected error: {str(e)}"}, status_code=400
+
+
+
+
+# import dropbox
+# from dropbox.exceptions import ApiError, AuthError
+# from fastapi import FastAPI, UploadFile, Form
+# from fastapi.responses import FileResponse, JSONResponse
+# import shutil
+# import os
+
+# app = FastAPI()
+
+# APP_KEY = "ex4dfq9bymy0b5l"
+# APP_SECRET = "tvcezmnq4z8tkpn"
+# ACCESS_TOKEN = "sl.u.AF63YsQpN-_kaiyFSDTnn2JT2FdPsTkL41DMiWx-0s5og1ouXjOVe0K8PAHhicYumrg2U7lv9gupq_7vJsrEvbwQ_2xFLxKhxTV8mf_7sHCc2S809-6pN8yp5IF03Xxl8nVM4jI05QHCnlXsqZe3mWwX3BAnzMTCXcwI7YnusyxBnBWm1Tmsos1GaYo8xFkdBoNZF7-6u1uLvra3kH6xV8wzfEvLzjcb9RGDLhha9_oi6uvv_wzb365FzU4ZJciAF3HziGDtFwUa-1BjGDT1uMxDdCbt7Vm7iZMPKhA1-_Rkug2D-occOAfRWMuEhcrxDKaaBGcQg1e1nWJbpGdU-VyG2qCFtwtgKFPRct6gyqkSpxo1lnDltScJSZdUyOlda4IMe7QhIA4XwUMMDr8nNDtgQgoh-SrCcWITMMk2f1VPKgkWUhPDWgmnPMam-6L7I7e3TSTw3KnJKPDiWUtW1uIkj5KXZJ1-QIdkO428Q_PVybd1tzqWkxPQ1nq2SLgasKLcgzgslY4DYdm5E1e2RcNSxnkftP3sFpneYLAYNVCycIis6GYBfNfQ0W90vl0d5IudR5emqDHq2tgfQ8XYFaYew9ycXZYZfUKvSKpPcYCemE3iqf9Vg9LxT6sbT5ZMYR2xjQoE5rAGIRq023al3HyanuYvdLMjiWWzsMdsSx6Bg0E-S-GtsmmYgVP4PmqAVfN-9Vq5UXnq2-j5YKKmM31odp4hDgTGd920C6s9K4QTwtg_FToArxhFuX7ME9AEXJgU4SI3FAn7YyuNTfD2RyvsbHyYLnbYdzqoEEZeGk7te06UgG2iXOXutf7yVItmy9hMOLw7WQQSavLXVpA-VS-C_WfbAtFIKR5l0JVE-iJi-bsrk1W5vIlcVb1ja_HM03LiWxDrW7nDKlbYMXrPx3X261brWAuUJn6B253NeZwyU1vn0N5JxsCP7oksGalVOYD2w-I3_xhI6Igk0x0hJu32CUTf0JtW9ZkznktGCugBDlq-CftuWOL-UxfOLG0fYSKZXJL2n8mjorFZZ79pc0Op5sEsARTtHt3EBGC0p_mgLVulAf6UjSfBz2LbD4w_LOlxNQ8k8ouVc4Yxp0T-NJzKx2n0PM6tGmKia-M5kXUv7IehKclDlKJgFwF5lCgOgWUtV8xccP9_IlsGnO2I79DBzHfaCeDS9UukULupwKV_Z9h0QWsgqZEDkwjvZ6UtXNDS6QtvQBWN_UteofYNPuVYRlGGWisZyGJrcUu-xSS9u_dhHyBQqjMea66Gr35HWnta31lSmvSPTC4lg9ZKfixE3U2Zc5cwwMPuBZPzqxcvM_Avi6dKSHM7zxv2dKDlAY6sbWrBuja9hn4LyhSKh-xVNCkOzHSWy3LAEtsBC1Tg3xRvZWc640zeuAx2PfzyA1XfhMYqCSnEKV_wJmv2ck5tC_NYcdosy61TflHYxAJq1A"
+
+# dbx = dropbox.Dropbox(
+#     oauth2_refresh_token=ACCESS_TOKEN,
+#     app_key=APP_KEY,
+#     app_secret=APP_SECRET
+# )
+
+# class DropboxService:
+#     def __init__(self, access_token: str):
+#         try:
+#             self.dbx = dropbox.Dropbox(access_token)
+#             self.dbx.users_get_current_account()
+#             print("✅ Dropbox authentication successful.")
+#         except AuthError as e:
+#             raise Exception("❌ Dropbox authentication failed.") from e
+
+#     def upload_file(self, local_path: str, dropbox_path: str):
+#         with open(local_path, "rb") as f:
+#             self.dbx.files_upload(
+#                 f.read(),
+#                 dropbox_path,
+#                 mode=dropbox.files.WriteMode.overwrite,
+#             )
+
+#     def download_file(self, dropbox_path: str, local_path: str):
+#         metadata, res = self.dbx.files_download(dropbox_path)
+#         with open(local_path, "wb") as f:
+#             f.write(res.content)
+
+#     def list_files(self, folder: str = ""):
+#         response = self.dbx.files_list_folder(folder)
+#         return [entry.name for entry in response.entries]
+
+
+# # Initialize service
+# dropbox_service = DropboxService(ACCESS_TOKEN)
+
+
+# @app.post("/dropbox/{action}")
+# async def dropbox_action(
+#     action: str,
+#     dropbox_path: str = Form("", description="Path in Dropbox"),
+#     folder: str = Form("", description="Folder path for listing"),
+#     file: UploadFile = None,
+# ):
+#     try:
+#         # ✅ Upload
+#         if action == "upload":
+#             if not file or not dropbox_path:
+#                 return JSONResponse(
+#                     content={"error": "file and dropbox_path required for upload"},
+#                     status_code=400,
+#                 )
+
+#             local_path = file.filename
+#             with open(local_path, "wb") as buffer:
+#                 shutil.copyfileobj(file.file, buffer)
+
+#             dropbox_service.upload_file(local_path, dropbox_path)
+#             os.remove(local_path)
+
+#             return {"status": "success", "action": "upload", "path": dropbox_path}
+
+#         # ✅ Download
+#         elif action == "download":
+#             if not dropbox_path:
+#                 return JSONResponse(
+#                     content={"error": "dropbox_path required for download"},
+#                     status_code=400,
+#                 )
+
+#             local_path = f"temp_{os.path.basename(dropbox_path)}"
+#             dropbox_service.download_file(dropbox_path, local_path)
+
+#             response = FileResponse(local_path, filename=os.path.basename(local_path))
+
+#             # cleanup after sending (FastAPI handles file streaming before deletion)
+#             @response.background
+#             def cleanup():
+#                 os.remove(local_path)
+
+#             return response
+
+#         # ✅ List
+#         elif action == "list":
+#             files = dropbox_service.list_files(folder)
+#             return {"status": "success", "action": "list", "files": files}
+
+#         # ❌ Invalid
+#         else:
+#             return JSONResponse(
+#                 content={"error": "Invalid action. Use upload, download, or list"},
+#                 status_code=400,
+#             )
+
+#     except ApiError as e:
+#         return JSONResponse(content={"error": str(e)}, status_code=400)
+
+
+# import dropbox
+# from dropbox.exceptions import ApiError, AuthError
+# from fastapi import APIRouter, UploadFile, Form
+# from fastapi.responses import FileResponse, JSONResponse
+# import os, shutil
+# from flask import app
+# from pydantic import BaseModel
+# from typing import Any
+
+# router = APIRouter(tags=["Dropbox"])
+
+# # Request schema
+# class DropboxRequest(BaseModel):
+#     params: dict
+#     tools: Any
+#     credentials: dict
+#     dependencies: dict | None = None
+#     previousResult: dict | None = None
+
+# def create_dropbox_client(credentials: dict):
+#     """Initialize Dropbox client with UI-provided credentials"""
+#     try:
+#         if credentials.get("oauth2_access_token"):
+#             dbx = dropbox.Dropbox(credentials["oauth2_access_token"])
+#         elif credentials.get("oauth2_refresh_token"):
+#             dbx = dropbox.Dropbox(
+#                 oauth2_refresh_token=credentials["oauth2_refresh_token"],
+#                 app_key=credentials["app_key"],
+#                 app_secret=credentials["app_secret"],
+#             )
+#         else:
+#             raise Exception("Missing Dropbox credentials")
+#         dbx.users_get_current_account()
+#         return dbx
+#     except AuthError:
+#         raise Exception("❌ Dropbox authentication failed. Invalid credentials.")
+
+# @app.post("/dropbox/{action}")
+# async def dropbox_action(
+#     action: str,
+#     request: DropboxRequest,
+#     file: UploadFile = None
+# ):
+#     try:
+#         params = request.params
+#         prev_out = request.previousResult or {}
+#         merged_params = {**prev_out, **params}
+#         dbx = create_dropbox_client(request.credentials)
+
+#         # ✅ Upload
+#         if action == "upload":
+#             dropbox_path = merged_params.get("dropbox_path")
+#             if not file or not dropbox_path:
+#                 return JSONResponse(
+#                     content={"error": "file and dropbox_path required for upload"},
+#                     status_code=400,
+#                 )
+
+#             local_path = file.filename
+#             with open(local_path, "wb") as buffer:
+#                 shutil.copyfileobj(file.file, buffer)
+
+#             with open(local_path, "rb") as f:
+#                 dbx.files_upload(f.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite)
+
+#             os.remove(local_path)
+#             return {"status": "success", "action": "upload", "path": dropbox_path}
+
+#         # ✅ Download
+#         elif action == "download":
+#             dropbox_path = merged_params.get("dropbox_path")
+#             if not dropbox_path:
+#                 return JSONResponse(
+#                     content={"error": "dropbox_path required for download"},
+#                     status_code=400,
+#                 )
+
+#             local_path = f"temp_{os.path.basename(dropbox_path)}"
+#             metadata, res = dbx.files_download(dropbox_path)
+#             with open(local_path, "wb") as f:
+#                 f.write(res.content)
+
+#             response = FileResponse(local_path, filename=os.path.basename(local_path))
+
+#             # cleanup after sending
+#             @response.background
+#             def cleanup():
+#                 os.remove(local_path)
+
+#             return response
+
+#         # ✅ List
+#         elif action == "list":
+#             folder = merged_params.get("folder", "")
+#             response = dbx.files_list_folder(folder)
+#             files = [entry.name for entry in response.entries]
+#             return {"status": "success", "action": "list", "files": files}
+
+#         # ❌ Invalid
+#         else:
+#             return JSONResponse(
+#                 content={"error": "Invalid action. Use upload, download, or list"},
+#                 status_code=400,
+#             )
+
+#     except ApiError as e:
+#         return JSONResponse(content={"error": str(e)}, status_code=400)
+#     except Exception as e:
+#         return JSONResponse(content={"error": str(e)}, status_code=400)
+
+
+# from typing import Any
+# from fastapi import APIRouter
+# from pydantic import BaseModel
+# import dropbox
+# from dropbox.exceptions import ApiError, AuthError
+# import os
+# import shutil
+
+# router = APIRouter(tags=["Dropbox"])
+
+# # Request body schema
+# class DropboxRequest(BaseModel):
+#     params: dict
+#     tools: Any
+#     credentials: dict | None = None
+#     dependencies: dict | None = None
+#     previousResult: dict | None = None
+
+
+# class DropboxService:
+#     def __init__(self, access_token: str):
+#         try:
+#             self.dbx = dropbox.Dropbox(access_token)
+#             self.dbx.users_get_current_account()
+#             print("✅ Dropbox authentication successful.")
+#         except AuthError as e:
+#             raise Exception("❌ Dropbox authentication failed.") from e
+
+#     def upload_file(self, local_path: str, dropbox_path: str):
+#         with open(local_path, "rb") as f:
+#             self.dbx.files_upload(
+#                 f.read(),
+#                 dropbox_path,
+#                 mode=dropbox.files.WriteMode.overwrite,
+#             )
+
+#     def download_file(self, dropbox_path: str, local_path: str):
+#         metadata, res = self.dbx.files_download(dropbox_path)
+#         with open(local_path, "wb") as f:
+#             f.write(res.content)
+
+#     def list_files(self, folder: str = ""):
+#         response = self.dbx.files_list_folder(folder)
+#         return [entry.name for entry in response.entries]
+
+
+# # --- API Routes ---
+
+# @router.post("/dropbox/upload")
+# async def dropbox_upload(request: DropboxRequest):
+#     print("Entered in Dropbox upload:", request.params)
+
+#     params = request.params
+#     prev_out = request.previousResult or {}
+#     merged_params = {**prev_out, **params}
+#     print("merged_params:", merged_params)
+
+#     # Required fields
+#     if not merged_params.get("local_file") or not merged_params.get("dropbox_path") or not request.credentials:
+#         return {"error": "Missing one or more required fields: local_file, dropbox_path, credentials"}
+
+#     # Setup Dropbox client
+#     service = DropboxService(request.credentials.get("access_token"))
+#     local_file = merged_params["local_file"]
+
+#     if not os.path.exists(local_file):
+#         return {"status": "error", "message": f"Local file '{local_file}' not found."}
+
+#     try:
+#         service.upload_file(local_file, merged_params["dropbox_path"])
+#         return {"status": "success", "message": f"File '{local_file}' uploaded to '{merged_params['dropbox_path']}'"}
+#     except ApiError as e:
+#         return {"status": "error", "message": f"Upload failed: {str(e)}"}
+
+
+# @router.post("/dropbox/download")
+# async def dropbox_download(request: DropboxRequest):
+#     print("Entered in Dropbox download:", request.params)
+
+#     params = request.params
+#     prev_out = request.previousResult or {}
+#     merged_params = {**prev_out, **params}
+
+#     if not merged_params.get("dropbox_path") or not merged_params.get("download_path") or not request.credentials:
+#         return {"error": "Missing one or more required fields: dropbox_path, download_path, credentials"}
+
+#     service = DropboxService(request.credentials.get("access_token"))
+
+#     try:
+#         service.download_file(merged_params["dropbox_path"], merged_params["download_path"])
+#         return {"status": "success", "message": f"File '{merged_params['dropbox_path']}' downloaded as '{merged_params['download_path']}'"}
+#     except ApiError as e:
+#         return {"status": "error", "message": f"Download failed: {str(e)}"}
+
+
+# @router.post("/dropbox/list")
+# async def dropbox_list(request: DropboxRequest):
+#     print("Entered in Dropbox list:", request.params)
+
+#     params = request.params
+#     prev_out = request.previousResult or {}
+#     merged_params = {**prev_out, **params}
+
+#     if not request.credentials:
+#         return {"error": "Missing credentials (access_token required)"}
+
+#     service = DropboxService(request.credentials.get("access_token"))
+
+#     try:
+#         folder = merged_params.get("folder", "")
+#         files = service.list_files(folder)
+#         return {"status": "success", "files": files}
+#     except ApiError as e:
+#         return {"status": "error", "message": f"List failed: {str(e)}"}
+
+
+
+
+# from fastapi import APIRouter, UploadFile, File, Form, Request
+# from fastapi.responses import JSONResponse
+# from typing import Optional
+# import json, os, shutil, tempfile
+# import dropbox
+# from dropbox.exceptions import ApiError, AuthError
+
+# router = APIRouter(tags=["Dropbox"])
+
+
+# class DropboxService:
+#     def __init__(self, credentials: dict):
+#         try:
+#             if credentials.get("refreshToken") and credentials.get("appKey") and credentials.get("appSecret"):
+#                 # ✅ Use refreshable token flow
+#                 self.dbx = dropbox.Dropbox(
+#                     oauth2_refresh_token=credentials["refreshToken"],
+#                     app_key=credentials["appKey"],
+#                     app_secret=credentials["appSecret"],
+#                 )
+#             elif credentials.get("accessToken"):
+#                 # ✅ Use plain access token (short-lived or long-lived)
+#                 self.dbx = dropbox.Dropbox(credentials["accessToken"])
+#             else:
+#                 raise ValueError("Missing Dropbox credentials")
+
+#             self.dbx.users_get_current_account()
+#             print("✅ Dropbox authentication successful.")
+
+#         except AuthError as e:
+#             raise Exception("❌ Dropbox authentication failed.") from e
+
+#     def upload_file(self, local_path: str, dropbox_path: str):
+#         with open(local_path, "rb") as f:
+#             self.dbx.files_upload(
+#                 f.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite
+#             )
+
+#     def download_file(self, dropbox_path: str, local_path: str):
+#         metadata, res = self.dbx.files_download(dropbox_path)
+#         with open(local_path, "wb") as f:
+#             f.write(res.content)
+
+#     def list_files(self, folder: str = ""):
+#         response = self.dbx.files_list_folder(folder)
+#         return [entry.name for entry in response.entries]
+
+
+# @router.post("/dropbox")
+# async def dropbox_action(
+#     request: Request,
+#     action: Optional[str] = Form(None),
+#     credentials: Optional[str] = Form(None),  # JSON string if multipart
+#     params: Optional[str] = Form("{}"),
+#     file: UploadFile = File(None),            # optional file
+# ):
+#     try:
+#         # 🔹 Hardcoded credentials for testing
+#         credentials = {
+#             "accessToken": "sl.u.AF_cK20BKT0V31dy3RXRkHjHkkDWytyeraUdLd8TsmKCBKxrSdkOP3rOE6QDrlDUopO9To2gwkOjju2sEojr6bBjOf6WZxgK-TwSFDKKFSkl_ufk16mWSurvLfFUnE1edrLLU12WlLgUfKtKCeaVUm14ITqznxH11YlF8duhDJ8rZFyOXSG6ptVeeCuk4FD0fEVlZcftxTGR3n8_x00ZD1sBH3gdcepDPGAx2YwExLtHbexrZIEFDF9q-v7hBTqZI5BjcHY5Mj821T62DDEF5gFhcdXerTW0GSKVsoihjRtjnp3sH7Ttxi5s6Q9YbV4P1GBA9JQ2QT6N9_HZi9Bw67mexH77tqgqiXLmcwS_pyE30pUZO6o1Zo_sLliWeT_3uxxmRGaQ83_Gk_mJ9XMhDIwLbBKOk6fYkknuqAw1G1B-_3RScje5BaX3ot3ittPdWxAjVn2vnBMUFx0N5Kv6NE_03ATApTVL4AaoLMPcIE7-7h06KCgS4ovMii9ZwVWokmN7apLM76QKjAMaKsVszGTv9BXCRYTuQAZKfLKwJ-pyeufwy4XlfHOZYkLnBGI_L5KCaXEsrRo1bKSCS3BRsUgUgNPUtnHcD_kroutC9rU1PN9QfGSzuoGPE2dBy7Lvb3K_9amcpQtHeGjbLkzEzkuUclMxKxkJn9MxcJXmF8wtWNBnLztpcOk2qGheunId2ZnH4FuIrxHWCvpuT20cLgCNPFEvvEobn2KHe5iEfQWXvbHso-LjRwSHyDb9VfNtTSBo2qAM4HdDgV8s6IYQjMkMKrzbcHgHs4excpErhVFIuLPIvBGofO6NawPPtNezOMown_A5lFTMb94vpHUJIqZ_I2MJqkBlrd8_ZTHbp9E3z3iSmBlFuI6aQ6Xs72pNCWmhoCaKyoDUMlRC2G_cBDX4sXdU7WhZ6-lvi3U2DtN418VB-D-nYA-5nwTwW-wCJ20q17Nc1VrRdF4ZTIc9pwoFhNHoScIcc0gqgEP4EYqY7ugbVD5KV0Sx6pTIyvM5dHRELwd03J5KZPjc7lHmhgi70coHlUaIxRD3HZD4KTyebUx84zi6o7Bgzaj45OdqkMF6tUgftW-KfudIPAb5prKY-48iLAcVl57MkoyDPCiF_-0aMG0q6dr84O-ylSKrfzpv1RIxMF_yVpCfKoAzmSv98YOi294JaAvSQa-cL2yTCsBAmOMZwnRUBZAyiJf05B0E-DkN7cgm0hfxD6GjBRLhakdRwMP8Trdo0fr7o1LWuxT_mMr7yTNimaOBVK30ZGNi3AQQXUZvxWKdQwk1875JrbtwmdpbCGm0STWXziDLQhwoYRhWTGvR-oKzxTlhIWyavBaVZt1ZzYgX8xpQyMp3-sZ3erU_5J7dkihyTbU8LlXuMiIF4wTLSJYKICV88HpSo453hRhqvlnTv_TzaIfi3aIeNckVLN6kgKuHct0-6Q",
+#             "appKey": "ex4dfq9bymy0b5l",
+#             "appSecret": "tvcezmnq4z8tkpn",
+#             "folderPath": "/test_upload.pdf"
+#         }
+#         params = {
+#             "dropbox_path": "/test_upload.pdf",
+#             "download_path": "/tmp/test_download.pdf",
+#             "local_file": "C:/Working_Dir/AgenticTools-py/OD332763263280536100 (4).pdf" 
+#         }
+#         action = "upload"  # change to "download" or "list" for testing
+
+#         # ✅ Init service
+#         service = DropboxService(credentials)
+
+#         # ✅ Upload
+#         if action == "upload":
+#             dropbox_path = params.get("dropbox_path") or credentials.get("folderPath")
+#             local_file = params.get("local_file")
+
+#             if not dropbox_path or (not file and not local_file):
+#                 return JSONResponse(
+#                     content={
+#                         "error": "Either (file) or (local_file) and dropbox_path required"
+#                     },
+#                     status_code=400,
+#                 )
+
+#             if file:
+#                 # Save to a temporary file
+#                 with tempfile.NamedTemporaryFile(delete=False) as tmp:
+#                     shutil.copyfileobj(file.file, tmp)
+#                     local_path = tmp.name
+#             else:
+#                 local_path = local_file
+
+#             if not os.path.exists(local_path):
+#                 return JSONResponse(
+#                     content={"error": f"Local file '{local_path}' not found."},
+#                     status_code=400,
+#                 )
+
+#             service.upload_file(local_path, dropbox_path)
+
+#             if file:
+#                 os.remove(local_path)
+
+#             return {"status": "success", "action": "upload", "path": dropbox_path}
+
+#         # ✅ Download
+#         elif action == "download":
+#             dropbox_path = params.get("dropbox_path") or credentials.get("folderPath")
+#             download_path = params.get("download_path")
+
+#             if not dropbox_path or not download_path:
+#                 return JSONResponse(
+#                     content={"error": "dropbox_path and download_path required"},
+#                     status_code=400,
+#                 )
+
+#             service.download_file(dropbox_path, download_path)
+#             return {
+#                 "status": "success",
+#                 "action": "download",
+#                 "message": f"Downloaded to {download_path}",
+#             }
+
+#         # ✅ List
+#         elif action == "list":
+#             folder = params.get("folder", "")
+#             files = service.list_files(folder)
+#             return {"status": "success", "action": "list", "files": files}
+
+#         # ❌ Invalid
+#         else:
+#             return JSONResponse(
+#                 content={"error": "Invalid action. Use upload, download, or list"},
+#                 status_code=400,
+#             )
+
+#     except ApiError as e:
+#         return JSONResponse(
+#             content={"error": f"Dropbox API error: {str(e)}"}, status_code=400
+#         )
+#     except Exception as e:
+#         return JSONResponse(
+#             content={"error": f"Unexpected error: {str(e)}"}, status_code=400
+#         )
+        
+
+
+
+
+
+
+from fastapi import APIRouter, Form, Request
+from fastapi.responses import JSONResponse
+from typing import Optional, Dict, Any
+import json, os, tempfile
+import dropbox
+from dropbox.exceptions import ApiError, AuthError
+
+router = APIRouter(tags=["Dropbox"])
+
+# -------------------- Helpers --------------------
+def get_dropbox_client(access_token: str) -> dropbox.Dropbox:
+    """Authenticate and return a Dropbox client."""
+    try:
+        print("[Dropbox] Initializing client...")
+        dbx = dropbox.Dropbox(access_token)
+        dbx.users_get_current_account()
+        print("[Dropbox] Authentication successful.")
+        return dbx
+    except AuthError as e:
+        print("[Dropbox] Authentication failed.")
+        raise Exception("Dropbox authentication failed.") from e
+
+
+def upload_file(dbx: dropbox.Dropbox, local_path: str, dropbox_path: str) -> None:
+    """Upload a file to Dropbox (overwrite mode)."""
+    print(f"[Dropbox] Uploading file '{local_path}' to '{dropbox_path}'...")
+    with open(local_path, "rb") as f:
+        dbx.files_upload(f.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite)
+    print("[Dropbox] Upload completed.")
+
+
+def download_file(dbx: dropbox.Dropbox, dropbox_path: str, local_path: str) -> None:
+    """Download a file from Dropbox."""
+    print(f"[Dropbox] Downloading file '{dropbox_path}' to '{local_path}'...")
+    metadata, res = dbx.files_download(dropbox_path)
+    with open(local_path, "wb") as f:
+        f.write(res.content)
+    print("[Dropbox] Download completed.")
+
+
+def list_files(dbx: dropbox.Dropbox, folder: str) -> list:
+    """List files in a Dropbox folder."""
+    print(f"[Dropbox] Listing files in folder '{folder}'...")
+    response = dbx.files_list_folder(folder)
+    files = [entry.name for entry in response.entries]
+    print(f"[Dropbox] Found files: {files}")
+    return files
+
+
+def build_dropbox_path(folder_name: Optional[str], file_name: Optional[str], dropbox_path: Optional[str]) -> str:
+    """Construct a valid Dropbox path from inputs."""
+
+    if dropbox_path:
+        return dropbox_path.replace("\\", "/")
+
+    if not folder_name and not file_name:
+        raise ValueError("Either dropboxPath or both folderName + fileName are required")
+
+    # If file_name already looks like a path (starts with "/"), use it directly
+    if file_name and file_name.startswith("/"):
+        return file_name.replace("\\", "/")
+
+    if not folder_name or not file_name:
+        raise ValueError("Both folderName and fileName are required when dropboxPath is not given")
+
+    return os.path.join(folder_name, file_name).replace("\\", "/")
+
+
+# -------------------- API --------------------
+@router.post("/dropbox")
+async def dropbox_action(
+    request: Request,
+    action: Optional[str] = Form(None),
+    credentials: Optional[str] = Form(None),
+    params: Optional[str] = Form("{}"),
+):
+    try:
+        # -------------------- Parse request --------------------
+        if request.headers.get("content-type", "").startswith("application/json"):
+            body = await request.json()
+            credentials: Dict[str, Any] = body.get("credentials") or body.get("tool_credentials") or {}
+            params: Dict[str, Any] = body.get("params", {})
+            action = body.get("action") or credentials.get("action")
+            previous_result = body.get("previousResult", {})
+        else:
+            credentials = json.loads(credentials or "{}")
+            params = json.loads(params or "{}")
+            action = action or credentials.get("action")
+
+        print(f"[API] Action: {action}")
+        print(f"[API] Params: {params}")
+        print(f"[API] Credentials: {credentials}")
+        print(f"[API] Previous Result: {previous_result}")
+
+        # -------------------- Normalize keys --------------------
+        # If frontend sends folderPath/filePath, map them to folderName/fileName
+        if "folderPath" in credentials:
+            credentials["folderName"] = credentials.pop("folderPath")
+        if "filePath" in credentials:
+            credentials["fileName"] = credentials.pop("filePath")
+
+        # -------------------- Validate --------------------
+        access_token = credentials.get("accessToken")
+        if not access_token:
+            return JSONResponse({"error": "Missing accessToken in credentials"}, status_code=400)
+
+        dbx = get_dropbox_client(access_token)
+
+        # -------------------- UPLOAD --------------------
+        if action == "upload":
+            folder_name = credentials.get("folderName")
+            file_name = credentials.get("fileName")
+            dropbox_path = credentials.get("dropboxPath")
+
+            if not previous_result:
+                return JSONResponse({"error": "previousResult is required for upload"}, status_code=400)
+
+            try:
+                dropbox_path = build_dropbox_path(folder_name, file_name, dropbox_path)
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+
+            # Write previousResult as JSON into temp file
+            with tempfile.NamedTemporaryFile(delete=False, mode="w", encoding="utf-8") as tmp:
+                json.dump(previous_result, tmp, indent=2)  # <-- save nicely formatted JSON
+                local_path = tmp.name
+
+            try:
+                upload_file(dbx, local_path, dropbox_path)
+            finally:
+                os.remove(local_path)
+
+            return {
+                "status": "success",
+                "action": "upload",
+                "filePath": dropbox_path,
+                "source": "previousResult",
+            }       
+        # -------------------- DOWNLOAD --------------------
+        elif action == "download":
+            folder_name = credentials.get("folderName")
+            file_name = credentials.get("fileName")
+            dropbox_path = credentials.get("dropboxPath")
+            download_path = params.get("download_path")
+
+            if not download_path:
+                return JSONResponse({"error": "download_path is required"}, status_code=400)
+
+            try:
+                dropbox_path = build_dropbox_path(folder_name, file_name, dropbox_path)
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+
+            download_file(dbx, dropbox_path, download_path)
+
+            return {
+                "status": "success",
+                "action": "download",
+                "filePath": dropbox_path,
+                "message": f"Downloaded to {download_path}",
+            }
+
+        # -------------------- LIST --------------------
+        elif action == "list":
+            folder = credentials.get("folderName") or credentials.get("dropboxPath")
+            if not folder:
+                return JSONResponse({"error": "folderName or dropboxPath is required for listing files"}, status_code=400)
+
+            files = list_files(dbx, folder)
+            return {"status": "success", "action": "list", "folderName": folder, "files": files}
+
+        # -------------------- INVALID --------------------
+        return JSONResponse({"error": "Invalid action. Use upload, download, or list"}, status_code=400)
+
+    except ApiError as e:
+        return JSONResponse({"error": f"Dropbox API error: {str(e)}"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": f"Unexpected error: {str(e)}"}, status_code=400)
